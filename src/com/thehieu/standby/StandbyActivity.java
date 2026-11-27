@@ -56,6 +56,8 @@ public class StandbyActivity extends Activity implements StandbyView.Host, Senso
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        // Xoay màn hình chuyển thẳng, không chạy hiệu ứng xoay chậm.
+        lp.rotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT;
         getWindow().setAttributes(lp);
         getWindow().setDecorFitsSystemWindows(false);
 
@@ -92,7 +94,8 @@ public class StandbyActivity extends Activity implements StandbyView.Host, Senso
         StandbyService.sVisible = true;
         StandbyService.onShown();
         hideBars();
-        if (acc != null) sm.registerListener(this, acc, SensorManager.SENSOR_DELAY_NORMAL);
+        // Đọc nhanh để nhận ra lúc dựng dọc gần như tức thì.
+        if (acc != null) sm.registerListener(this, acc, SensorManager.SENSOR_DELAY_GAME);
         if (light != null) sm.registerListener(this, light, SensorManager.SENSOR_DELAY_NORMAL);
         lastInfo = 0;
         h.removeCallbacks(tick);
@@ -247,15 +250,16 @@ public class StandbyActivity extends Activity implements StandbyView.Host, Senso
     public void onSensorChanged(SensorEvent e) {
         long now = SystemClock.uptimeMillis();
         if (e.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            float k = haveG ? 0.3f : 1f;
+            float k = haveG ? 0.45f : 1f;
             gx += k * (e.values[0] - gx);
             gy += k * (e.values[1] - gy);
             gz += k * (e.values[2] - gz);
             haveG = true;
             if (preview) return;
-            if (StandbyService.classify(gx, gy, gz) == StandbyService.ST_PORT) {
+            float ax = Math.abs(gx), ay = Math.abs(gy);
+            if (ay > 6.0f && ay > ax + 2.5f) {
                 if (portraitSince < 0) portraitSince = now;
-                else if (now - portraitSince > 1000) finish();
+                else if (now - portraitSince > 250) exitNow();
             } else {
                 portraitSince = -1;
             }
@@ -277,6 +281,18 @@ public class StandbyActivity extends Activity implements StandbyView.Host, Senso
 
     @Override
     public void onAccuracyChanged(Sensor s, int a) { }
+
+    /** Thoát ngay khi dựng dọc: ẩn nội dung, không hiệu ứng đóng. */
+    void exitNow() {
+        if (isFinishing()) return;
+        view.setVisibility(android.view.View.INVISIBLE);
+        finish();
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0);
+        } else {
+            overridePendingTransition(0, 0);
+        }
+    }
 
     final BroadcastReceiver rx = new BroadcastReceiver() {
         @Override
